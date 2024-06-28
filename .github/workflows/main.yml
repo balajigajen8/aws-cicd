@@ -1,0 +1,64 @@
+name: Deploy to AWS Elastic Beanstalk
+
+on:
+  push:
+    branches:
+      - main  # adjust to your main branch name
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: '18'  # adjust to your Node.js version
+
+      - name: Install AWS CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3 python3-venv
+          python3 -m venv venv
+          source venv/bin/activate
+          pip install --upgrade pip
+          pip install awscli
+      - name: Install Angular CLI and dependencies
+        run: |
+          npm install -g @angular/cli
+          npm install
+      - name: Build Angular app
+        run: npm run build
+        
+      - name: Generate timestamp
+        id: timestamp
+        run: echo "::set-output name=date::$(date +'%Y%m%d%H%M%S')"
+
+      - name: Create deployment folder and package app
+        run: |
+          mkdir deployment
+          zip -r deployment/angular-aws-cicd-${{ steps.timestamp.outputs.date }}.zip .
+          
+      - name: Upload artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: angular-aws-cicd
+          path: deployment/angular-aws-cicd-${{ steps.timestamp.outputs.date }}.zip
+          if-no-files-found: warn
+
+      - name: Deploy to Elastic Beanstalk
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: 'us-east-1'  # replace with your AWS region, e.g., 'us-west-2'
+        run: |
+          aws s3 cp deployment/my-angular-app-${{ steps.timestamp.outputs.date }}.zip s3://my-angular-app-buckets/  # replace with your S3 bucket name
+          aws elasticbeanstalk create-application-version --application-name angular-aws-cicd --version-label $GITHUB_SHA --source-bundle S3Bucket="my-angular-app-buckets",S3Key="angular-aws-cicd-${{ steps.timestamp.outputs.date }}.zip "
+          aws elasticbeanstalk update-environment --application-name angular-aws-cicd --environment-name Angular-aws-cicd-env --version-label $GITHUB_SHA
+      
+      - name: Clean up
+        run: |
+          rm -rf node_modules angular-aws-cicd-${{ steps.timestamp.outputs.date }}.zip
